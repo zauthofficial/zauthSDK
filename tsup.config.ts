@@ -12,5 +12,6 @@ export default defineConfig({
   clean: true,
   treeshake: true,
   minify: false,
+  outDir: 'dist',
   external: ['express', 'viem'],
 });
