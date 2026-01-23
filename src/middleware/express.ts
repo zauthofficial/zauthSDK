@@ -291,6 +291,19 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
         client.queueEvent(paymentEvent);
       }
 
+      // Look up expectedResponse from refund endpoint config
+      let expectedResponse: string | undefined;
+      if (config.refund.endpoints) {
+        const requestPath = req.path;
+        for (const [pattern, endpointConfig] of Object.entries(config.refund.endpoints)) {
+          const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+          if (regex.test(requestPath) || regex.test(fullUrl)) {
+            expectedResponse = endpointConfig.expectedResponse;
+            break;
+          }
+        }
+      }
+
       // Create response event
       const responseEvent: ResponseEvent = {
         ...client.createEventBase('response'),
@@ -312,6 +325,7 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
         validationResult,
         paymentResponse: paymentResponse || undefined,
         errorMessage: validationResult.reason,
+        expectedResponse,
       };
 
       // Queue response event
