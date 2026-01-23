@@ -86,6 +86,8 @@ export interface ResponseEvent extends ZauthEventBase {
   paymentResponse?: X402PaymentInfo;
   /** Error message if failed */
   errorMessage?: string;
+  /** Expected response shape (from provider config) for server-side AI validation */
+  expectedResponse?: string;
 }
 
 /**
