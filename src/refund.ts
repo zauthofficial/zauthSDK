@@ -299,7 +299,6 @@ export class RefundExecutor {
   private persistentRetryDelay = 60000; // 60s in persistent phase
   private fastPhaseAttempts = 5; // Switch to persistent after 5 attempts
   private isShuttingDown = false;
-  private wasConnected = false; // Track if we ever connected successfully
   private pingInterval: ReturnType<typeof setInterval> | null = null;
 
   // Track daily/monthly totals locally for quick cap checks
@@ -371,7 +370,6 @@ export class RefundExecutor {
           this.log('WebSocket connected');
         }
         this.reconnectAttempts = 0;
-        this.wasConnected = true;
 
         // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
