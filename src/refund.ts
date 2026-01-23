@@ -295,9 +295,11 @@ export class RefundExecutor {
   private ws: InstanceType<typeof WebSocket> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
   private baseReconnectDelay = 1000;
+  private persistentRetryDelay = 60000; // 60s in persistent phase
+  private fastPhaseAttempts = 5; // Switch to persistent after 5 attempts
   private isShuttingDown = false;
+  private wasConnected = false; // Track if we ever connected successfully
   private pingInterval: ReturnType<typeof setInterval> | null = null;
 
   // Track daily/monthly totals locally for quick cap checks
@@ -354,14 +356,22 @@ export class RefundExecutor {
 
     const wsUrl = `${wsEndpoint}/ws/refunds?apiKey=${encodeURIComponent(clientConfig.apiKey)}`;
 
-    this.log('Connecting to refund WebSocket', { endpoint: wsEndpoint });
+    // Only log on first connection attempt
+    if (this.reconnectAttempts === 0) {
+      this.log('Connecting to refund WebSocket', { endpoint: wsEndpoint });
+    }
 
     try {
       this.ws = new WS(wsUrl);
 
       this.ws.onopen = () => {
-        this.log('WebSocket connected');
+        if (this.reconnectAttempts > 0) {
+          this.log('WebSocket reconnected');
+        } else {
+          this.log('WebSocket connected');
+        }
         this.reconnectAttempts = 0;
+        this.wasConnected = true;
 
         // Start ping interval to keep connection alive
         this.pingInterval = setInterval(() => {
@@ -380,17 +390,19 @@ export class RefundExecutor {
       };
 
       this.ws.onclose = (event) => {
-        this.log('WebSocket closed', { code: event.code, reason: event.reason });
+        // Only log on first disconnect, not on every retry failure
+        if (this.reconnectAttempts === 0) {
+          this.log('WebSocket disconnected', { code: event.code, reason: event.reason });
+        }
         this.cleanup();
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = (error) => {
-        this.log('WebSocket error', { error: String(error) });
+      this.ws.onerror = () => {
+        // Silence error logs during retries — onclose handles reconnection
       };
 
     } catch (error) {
-      this.log('WebSocket connection failed', { error: (error as Error).message });
       this.scheduleReconnect();
     }
   }
@@ -596,25 +608,28 @@ export class RefundExecutor {
   }
 
   /**
-   * Schedule reconnection with exponential backoff
+   * Schedule reconnection with two-phase strategy:
+   * - Fast phase: exponential backoff (1s, 2s, 4s, 8s, 16s) for quick recovery
+   * - Persistent phase: fixed 60s interval, retries indefinitely until reconnected
    */
   private scheduleReconnect(): void {
     if (this.isShuttingDown) {
       return;
     }
 
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.log('Max reconnect attempts reached, stopping');
-      return;
+    let delay: number;
+    if (this.reconnectAttempts < this.fastPhaseAttempts) {
+      // Fast phase: exponential backoff
+      delay = this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts);
+    } else {
+      // Persistent phase: fixed interval
+      if (this.reconnectAttempts === this.fastPhaseAttempts) {
+        this.log('Server unreachable, retrying every 60s');
+      }
+      delay = this.persistentRetryDelay;
     }
 
-    const delay = Math.min(
-      this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts),
-      30000 // Max 30 seconds
-    );
-
     this.reconnectAttempts++;
-    this.log('Scheduling reconnect', { attempt: this.reconnectAttempts, delay });
 
     this.reconnectTimer = setTimeout(() => {
       this.connect();
