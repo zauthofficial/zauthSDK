@@ -235,6 +235,8 @@ export interface EndpointRefundConfig {
   triggers?: Partial<RefundTriggers>;
   /** Custom matcher for this endpoint */
   shouldRefund?: (response: unknown, statusCode: number, validationResult: ValidationResult) => boolean;
+  /** Plain text description of expected response shape for AI validation */
+  expectedResponse?: string;
 }
 
 /**
