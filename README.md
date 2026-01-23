@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/z-small.png" alt="" width="32" height="32" />
+  <img src="assets/z-small.png" alt="" width="80" height="80" />
   <br />
   <strong style="font-size: 24px;">@zauthx402/sdk</strong>
 </p>
