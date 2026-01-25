@@ -1,6 +1,6 @@
 {
   "name": "@zauthx402/sdk",
-  "version": "0.1.1",
+  "version": "0.1.6",
   "description": "Monitoring, verification, and refund SDK for x402 payment endpoints",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -43,7 +43,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/zauthx402/zauthSDK"
+    "url": "https://github.com/zauthofficial/zauthSDK"
   },
   "engines": {
     "node": ">=18.0.0"

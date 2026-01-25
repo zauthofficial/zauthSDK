@@ -69,6 +69,27 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
     if (config.debug) {
       console.log('[zauthSDK] Refund executor started');
     }
+
+    // Register refund config with server (non-blocking)
+    client.updateRefundConfig({
+      enabled: true,
+      maxRefundUsdCents: Math.round((config.refund.maxRefundUsd || 1) * 100),
+      dailyCapCents: config.refund.dailyCapUsd ? Math.round(config.refund.dailyCapUsd * 100) : undefined,
+      monthlyCapCents: config.refund.monthlyCapUsd ? Math.round(config.refund.monthlyCapUsd * 100) : undefined,
+      triggers: {
+        serverError: config.refund.triggers?.serverError ?? true,
+        timeout: config.refund.triggers?.timeout ?? true,
+        emptyResponse: config.refund.triggers?.emptyResponse ?? true,
+        schemaValidation: config.refund.triggers?.schemaValidation ?? false,
+        minMeaningfulness: config.refund.triggers?.minMeaningfulness ?? 0.3,
+      },
+    }).then(result => {
+      if (config.debug) {
+        console.log('[zauthSDK] Refund config registered with server', { success: result.success });
+      }
+    }).catch(err => {
+      console.error('[zauthSDK] Failed to register refund config:', err.message);
+    });
   }
 
   /**

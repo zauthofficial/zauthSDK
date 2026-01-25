@@ -307,6 +307,9 @@ export class RefundExecutor {
   private lastCapResetDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   private lastCapResetMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
+  // Track processed refundIds to prevent double execution within same session
+  private processedRefundIds = new Set<string>();
+
   constructor(client: ZauthClient, config: ResolvedRefundConfig, debug = false) {
     this.client = client;
     this.config = config;
@@ -430,6 +433,13 @@ export class RefundExecutor {
           this.log('Refund rejection acknowledged', { refundId: msg.refundId });
           break;
 
+        case 'executing_ack':
+          // Server acknowledged we're executing this refund
+          if (this.debug) {
+            this.log('Refund executing acknowledged', { refundId: msg.refundId, status: msg.status });
+          }
+          break;
+
         case 'pong':
           // Server responded to ping
           break;
@@ -447,6 +457,12 @@ export class RefundExecutor {
    */
   private async processSingleRefund(refund: PendingRefund): Promise<void> {
     try {
+      // Prevent double execution within same session
+      if (this.processedRefundIds.has(refund.id)) {
+        this.log('Refund already processed in this session', { refundId: refund.id });
+        return;
+      }
+
       // Check endpoint-specific config
       const endpointConfig = this.getEndpointConfig(refund.url);
 
@@ -517,10 +533,19 @@ export class RefundExecutor {
         }
       }
 
+      // Notify server we're about to execute (prevents re-send on reconnect)
+      this.sendMessage({
+        type: 'refund_executing',
+        refundId: refund.id,
+      });
+
       // Execute the refund
       const result = await this.executeRefundTx(refund);
 
       if (result.success) {
+        // Mark as processed to prevent double execution in same session
+        this.processedRefundIds.add(refund.id);
+
         // Confirm via WebSocket
         this.sendMessage({
           type: 'refund_confirmed',
