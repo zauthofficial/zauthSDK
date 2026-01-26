@@ -323,7 +323,8 @@ export function extractPaymentFromRequest(req: Record<string, unknown>): Extract
  * Decode X-PAYMENT header to extract payer info
  * The X-PAYMENT header contains a base64-encoded JSON with payment details
  *
- * x402 V2 format: {"x402Version":2,"payload":{"authorization":{"from":"0x..."}}}
+ * x402 V2 EVM format: {"x402Version":2,"payload":{"authorization":{"from":"0x..."}}}
+ * x402 V2 Solana format: {"x402Version":2,"payload":{"transaction":"base64..."}}
  * x402 V1 format: varies
  */
 export function decodePaymentHeader(paymentHeader: string | null): { payer: string | null; amount: string | null; network: string | null } | null {
@@ -346,15 +347,21 @@ export function decodePaymentHeader(paymentHeader: string | null): { payer: stri
 
     const parsed = JSON.parse(decoded);
 
-    // x402 V2 format: payload.authorization.from
+    // x402 V2 EVM format: payload.authorization.from
+    // x402 V2 Solana format: payload.transaction (base64 Solana tx)
     // x402 V1 format: varies
-    const payer =
-      parsed.payload?.authorization?.from ||  // x402 V2
+    let payer =
+      parsed.payload?.authorization?.from ||  // x402 V2 EVM
       parsed.payer ||
       parsed.from ||
       parsed.payload?.from ||
       parsed.x?.signature?.address ||
       null;
+
+    // For Solana x402 V2, extract payer from the transaction
+    if (!payer && parsed.payload?.transaction) {
+      payer = extractSolanaFeePayer(parsed.payload.transaction);
+    }
 
     const amount =
       parsed.payload?.authorization?.value ||  // x402 V2
@@ -362,17 +369,115 @@ export function decodePaymentHeader(paymentHeader: string | null): { payer: stri
       parsed.payload?.amount ||
       null;
 
-    const network =
-      parsed.payload?.authorization?.network ||  // x402 V2
+    // Detect network from payload or transaction format
+    let network =
+      parsed.payload?.authorization?.network ||  // x402 V2 EVM
       parsed.network ||
       parsed.payload?.network ||
       null;
+
+    // If we extracted a Solana payer, set network to solana
+    if (!network && parsed.payload?.transaction && payer) {
+      network = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'; // Solana mainnet
+    }
 
     return { payer, amount, network };
   } catch {
     // Could not decode payment header
     return null;
   }
+}
+
+/**
+ * Extract fee payer from a base64-encoded Solana transaction
+ * Solana V0 transactions have the fee payer as the first account in the account keys
+ */
+function extractSolanaFeePayer(base64Transaction: string): string | null {
+  try {
+    // Decode base64 to bytes
+    const txBytes = typeof Buffer !== 'undefined'
+      ? Buffer.from(base64Transaction, 'base64')
+      : Uint8Array.from(atob(base64Transaction), c => c.charCodeAt(0));
+
+    // Solana V0 transaction format:
+    // - 1 byte: number of signatures
+    // - n * 64 bytes: signatures
+    // - 1 byte: message header (num_required_signatures)
+    // - ... more header bytes
+    // - Account keys start after header
+
+    let offset = 0;
+
+    // Read number of signatures (compact-u16 encoded)
+    const numSignatures = txBytes[offset];
+    offset += 1;
+
+    // Skip signatures (64 bytes each)
+    offset += numSignatures * 64;
+
+    // Now we're at the message
+    // Check if this is a versioned transaction (V0)
+    const firstByte = txBytes[offset];
+
+    if ((firstByte & 0x80) !== 0) {
+      // Versioned transaction - version is (firstByte & 0x7f)
+      offset += 1; // Skip version byte
+    }
+
+    // Message header
+    // - num_required_signatures (1 byte)
+    // - num_readonly_signed_accounts (1 byte)
+    // - num_readonly_unsigned_accounts (1 byte)
+    offset += 3;
+
+    // Number of account keys (compact-u16)
+    const numAccounts = txBytes[offset];
+    offset += 1;
+
+    // First account is the fee payer (32 bytes)
+    if (numAccounts > 0 && offset + 32 <= txBytes.length) {
+      const feePayerBytes = txBytes.slice(offset, offset + 32);
+      // Convert to base58
+      return base58Encode(feePayerBytes);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Simple base58 encoder for Solana public keys
+ */
+function base58Encode(bytes: Uint8Array | Buffer): string {
+  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const BASE = 58;
+
+  // Convert bytes to a big integer
+  let num = BigInt(0);
+  for (const byte of bytes) {
+    num = num * BigInt(256) + BigInt(byte);
+  }
+
+  // Convert to base58
+  let result = '';
+  while (num > 0) {
+    const remainder = Number(num % BigInt(BASE));
+    num = num / BigInt(BASE);
+    result = ALPHABET[remainder] + result;
+  }
+
+  // Add leading '1's for leading zero bytes
+  for (const byte of bytes) {
+    if (byte === 0) {
+      result = '1' + result;
+    } else {
+      break;
+    }
+  }
+
+  return result || '1';
 }
 
 /**

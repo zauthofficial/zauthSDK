@@ -146,10 +146,15 @@ export interface RefundConfig {
   signer?: RefundSigner;
 
   /**
-   * Private key for refund transactions (deprecated, use signer)
+   * Private key for EVM refund transactions (hex format)
    * @deprecated Use signer instead
    */
   privateKey?: string;
+
+  /**
+   * Private key for Solana refund transactions (base58 format)
+   */
+  solanaPrivateKey?: string;
 
   /**
    * Default network for refunds (can be overridden per-endpoint)
@@ -375,6 +380,7 @@ export interface ResolvedRefundConfig {
   enabled: boolean;
   signer?: RefundSigner;
   privateKey?: string;
+  solanaPrivateKey?: string;
   network: X402Network;
   triggers: Required<RefundTriggers>;
   maxRefundUsd: number;
@@ -420,6 +426,7 @@ export const DEFAULT_CONFIG: Omit<ResolvedConfig, 'apiKey' | 'mode'> = {
   refund: {
     enabled: false,
     privateKey: process.env.ZAUTH_REFUND_PRIVATE_KEY,
+    solanaPrivateKey: process.env.ZAUTH_SOLANA_PRIVATE_KEY,
     network: 'base',
     triggers: {
       serverError: true,
@@ -455,6 +462,7 @@ export function resolveConfig(config: ZauthConfig): ResolvedConfig {
     enabled: config.refund?.enabled ?? DEFAULT_CONFIG.refund.enabled,
     signer: config.refund?.signer,
     privateKey: config.refund?.privateKey ?? DEFAULT_CONFIG.refund.privateKey,
+    solanaPrivateKey: config.refund?.solanaPrivateKey ?? DEFAULT_CONFIG.refund.solanaPrivateKey,
     network: config.refund?.network ?? DEFAULT_CONFIG.refund.network,
     triggers: {
       ...DEFAULT_CONFIG.refund.triggers,

@@ -56,7 +56,12 @@
       "optional": true
     }
   },
-  "dependencies": {},
+  "dependencies": {
+    "@solana/kit": "^5.1.0",
+    "@solana/signers": "^5.1.0",
+    "@solana-program/token": "^0.9.0",
+    "bs58": "^6.0.0"
+  },
   "optionalDependencies": {
     "viem": "^2.0.0"
   },

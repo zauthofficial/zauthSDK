@@ -805,9 +805,9 @@ export class RefundExecutor {
   }
 
   /**
-   * Execute Solana refund
+   * Execute Solana refund using @solana/kit v2 libraries
    */
-  private async executeSolanaRefund(_refund: PendingRefund, _amountRaw: string): Promise<{
+  private async executeSolanaRefund(refund: PendingRefund, amountRaw: string): Promise<{
     success: boolean;
     txHash?: string;
     amountRaw?: string;
@@ -815,12 +815,122 @@ export class RefundExecutor {
     error?: string;
     retryable?: boolean;
   }> {
-    // TODO: Implement Solana refund
-    return {
-      success: false,
-      error: 'Solana refunds not yet implemented',
-      retryable: false,
-    };
+    try {
+      // Get Solana private key
+      const solanaPrivateKey = this.config.solanaPrivateKey;
+      if (!solanaPrivateKey) {
+        return {
+          success: false,
+          error: 'No Solana private key configured (set ZAUTH_SOLANA_PRIVATE_KEY)',
+          retryable: false,
+        };
+      }
+
+      // Dynamically import Solana v2 packages
+      const { createKeyPairSignerFromPrivateKeyBytes } = await import('@solana/signers');
+      const {
+        createSolanaRpc,
+        address,
+        pipe,
+        createTransactionMessage,
+        setTransactionMessageFeePayer,
+        setTransactionMessageLifetimeUsingBlockhash,
+        appendTransactionMessageInstructions,
+        signTransactionMessageWithSigners,
+        getBase64EncodedWireTransaction,
+      } = await import('@solana/kit');
+      const {
+        findAssociatedTokenPda,
+        getTransferInstruction,
+        TOKEN_PROGRAM_ADDRESS,
+      } = await import('@solana-program/token');
+      const bs58 = await import('bs58');
+
+      // USDC mint on Solana mainnet
+      const USDC_MINT = address('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+
+      // Create RPC client
+      const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+      const rpc = createSolanaRpc(rpcUrl);
+
+      // Create signer from private key (base58 encoded -> 64 bytes -> first 32 bytes for private key)
+      let signer: Awaited<ReturnType<typeof createKeyPairSignerFromPrivateKeyBytes>>;
+      try {
+        const secretKey = bs58.default.decode(solanaPrivateKey);
+        // The secret key is 64 bytes: first 32 are private key, last 32 are public key
+        const privateKeyBytes = secretKey.slice(0, 32);
+        signer = await createKeyPairSignerFromPrivateKeyBytes(privateKeyBytes);
+      } catch {
+        return {
+          success: false,
+          error: 'Invalid Solana private key format (expected base58)',
+          retryable: false,
+        };
+      }
+
+      // Parse recipient address
+      const recipientAddress = address(refund.recipientAddress);
+
+      // Find ATAs for sender and recipient
+      const [senderAta] = await findAssociatedTokenPda({
+        mint: USDC_MINT,
+        owner: signer.address,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      });
+
+      const [recipientAta] = await findAssociatedTokenPda({
+        mint: USDC_MINT,
+        owner: recipientAddress,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      });
+
+      // Create transfer instruction
+      const transferIx = getTransferInstruction({
+        source: senderAta,
+        destination: recipientAta,
+        authority: signer,
+        amount: BigInt(amountRaw),
+      });
+
+      // Get latest blockhash
+      const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+
+      // Build transaction
+      const tx = pipe(
+        createTransactionMessage({ version: 0 }),
+        (tx) => setTransactionMessageFeePayer(signer.address, tx),
+        (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+        (tx) => appendTransactionMessageInstructions([transferIx], tx),
+      );
+
+      // Sign transaction
+      const signedTx = await signTransactionMessageWithSigners(tx);
+
+      // Send transaction
+      const base64Tx = getBase64EncodedWireTransaction(signedTx);
+      const txSignature = await rpc.sendTransaction(base64Tx, { encoding: 'base64' }).send();
+
+      this.log('Solana refund sent', {
+        txHash: txSignature,
+        to: refund.recipientAddress,
+        amount: amountRaw,
+      });
+
+      return {
+        success: true,
+        txHash: txSignature,
+        amountRaw,
+        gasCostCents: 0, // Solana fees are negligible
+      };
+
+    } catch (error) {
+      this.log('Solana refund failed', { error: (error as Error).message });
+      return {
+        success: false,
+        error: (error as Error).message,
+        retryable: true,
+      };
+    }
   }
 
   /**
