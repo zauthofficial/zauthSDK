@@ -1,6 +1,6 @@
 {
   "name": "@zauthx402/sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Monitoring, verification, and refund SDK for x402 payment endpoints",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
