@@ -264,10 +264,8 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
           payer: facilitatorResponse.payer,
         };
       }
-      // Otherwise if we have decoded payment header, use that
       else if (!paymentResponse && decodedPayment?.payer && incomingPaymentHeader) {
         const defaultAmount = (options as unknown as Record<string, unknown>).defaultPaymentAmountUsdc as string | undefined;
-        // decodedPayment.amount is in base units, convert to USDC
         const amountUsdc = decodedPayment.amount
           ? baseUnitsToUsdc(decodedPayment.amount)
           : defaultAmount || null;

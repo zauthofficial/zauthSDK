@@ -389,59 +389,94 @@ export function decodePaymentHeader(paymentHeader: string | null): { payer: stri
 }
 
 /**
- * Extract fee payer from a base64-encoded Solana transaction
- * Solana V0 transactions have the fee payer as the first account in the account keys
+ * SPL Token program addresses for identifying token transfer instructions
+ */
+const SPL_TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const SPL_TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+/**
+ * Extract the token transfer authority (the actual payer) from a Solana x402 payment transaction.
+ *
+ * In x402 SVM, the transaction fee payer is often the facilitator or provider,
+ * NOT the client who paid. The actual client address is the authority on the
+ * SPL Token TransferChecked instruction (accountIndices[3]).
+ *
+ * Falls back to the fee payer (first account) if no token transfer is found.
  */
 function extractSolanaFeePayer(base64Transaction: string): string | null {
   try {
-    // Decode base64 to bytes
     const txBytes = typeof Buffer !== 'undefined'
       ? Buffer.from(base64Transaction, 'base64')
       : Uint8Array.from(atob(base64Transaction), c => c.charCodeAt(0));
 
-    // Solana V0 transaction format:
-    // - 1 byte: number of signatures
-    // - n * 64 bytes: signatures
-    // - 1 byte: message header (num_required_signatures)
-    // - ... more header bytes
-    // - Account keys start after header
-
     let offset = 0;
 
-    // Read number of signatures (compact-u16 encoded)
+    // Skip signatures
     const numSignatures = txBytes[offset];
-    offset += 1;
+    offset += 1 + numSignatures * 64;
 
-    // Skip signatures (64 bytes each)
-    offset += numSignatures * 64;
-
-    // Now we're at the message
-    // Check if this is a versioned transaction (V0)
-    const firstByte = txBytes[offset];
-
-    if ((firstByte & 0x80) !== 0) {
-      // Versioned transaction - version is (firstByte & 0x7f)
-      offset += 1; // Skip version byte
+    // Check for V0 message prefix
+    if ((txBytes[offset] & 0x80) !== 0) {
+      offset += 1;
     }
 
-    // Message header
-    // - num_required_signatures (1 byte)
-    // - num_readonly_signed_accounts (1 byte)
-    // - num_readonly_unsigned_accounts (1 byte)
+    // Message header: [numRequiredSignatures, numReadonlySignedAccounts, numReadonlyUnsignedAccounts]
     offset += 3;
 
-    // Number of account keys (compact-u16)
+    // Account keys
     const numAccounts = txBytes[offset];
     offset += 1;
 
-    // First account is the fee payer (32 bytes)
-    if (numAccounts > 0 && offset + 32 <= txBytes.length) {
-      const feePayerBytes = txBytes.slice(offset, offset + 32);
-      // Convert to base58
-      return base58Encode(feePayerBytes);
+    const accountKeys: Uint8Array[] = [];
+    for (let i = 0; i < numAccounts; i++) {
+      accountKeys.push(txBytes.slice(offset, offset + 32));
+      offset += 32;
     }
 
-    return null;
+    if (accountKeys.length === 0) return null;
+
+    // Skip recent blockhash (32 bytes)
+    offset += 32;
+
+    // Parse instructions to find the token transfer authority
+    const numInstructions = txBytes[offset];
+    offset += 1;
+
+    for (let i = 0; i < numInstructions; i++) {
+      const programIdIndex = txBytes[offset];
+      offset += 1;
+
+      // Read account indices (compact array)
+      const numIxAccounts = txBytes[offset];
+      offset += 1;
+      const ixAccountIndices: number[] = [];
+      for (let j = 0; j < numIxAccounts; j++) {
+        ixAccountIndices.push(txBytes[offset]);
+        offset += 1;
+      }
+
+      // Read instruction data (compact array)
+      const dataLen = txBytes[offset];
+      offset += 1 + dataLen;
+
+      // Check if this instruction is for SPL Token / Token-2022
+      const programAddr = base58Encode(accountKeys[programIdIndex]);
+      if (programAddr === SPL_TOKEN_PROGRAM || programAddr === SPL_TOKEN_2022_PROGRAM) {
+        // TransferChecked has 4 accounts: [source, mint, destination, authority]
+        if (ixAccountIndices.length >= 4) {
+          const authorityIndex = ixAccountIndices[3];
+          return base58Encode(accountKeys[authorityIndex]);
+        }
+        // Transfer has 3 accounts: [source, destination, authority]
+        if (ixAccountIndices.length >= 3) {
+          const authorityIndex = ixAccountIndices[2];
+          return base58Encode(accountKeys[authorityIndex]);
+        }
+      }
+    }
+
+    // Fallback: return fee payer (first account)
+    return base58Encode(accountKeys[0]);
   } catch {
     return null;
   }
