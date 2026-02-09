@@ -364,7 +364,8 @@ export function decodePaymentHeader(paymentHeader: string | null): { payer: stri
     }
 
     const amount =
-      parsed.payload?.authorization?.value ||  // x402 V2
+      parsed.payload?.authorization?.value ||  // x402 V2 EVM
+      parsed.accepted?.amount ||               // x402 V2 (accepted payment requirements)
       parsed.amount ||
       parsed.payload?.amount ||
       null;

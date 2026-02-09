@@ -254,10 +254,12 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
       if (facilitatorResponse?.payer) {
         // Get default amount from config if available
         const defaultAmount = (options as unknown as Record<string, unknown>).defaultPaymentAmountUsdc as string | undefined;
+        // Use decoded payment header amount (from accepted requirements) when available
+        const decodedAmountUsdc = decodedPayment?.amount ? baseUnitsToUsdc(decodedPayment.amount) : null;
         paymentResponse = {
           transactionHash: facilitatorResponse.transaction || null,
-          amountPaid: null, // Amount not in facilitator response
-          amountPaidUsdc: defaultAmount || null,
+          amountPaid: decodedPayment?.amount || null,
+          amountPaidUsdc: decodedAmountUsdc || defaultAmount || null,
           network: facilitatorResponse.network || 'base',
           payTo: null,
           asset: 'USDC',
