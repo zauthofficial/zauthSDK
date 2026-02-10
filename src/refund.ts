@@ -325,8 +325,8 @@ export class RefundExecutor {
       return;
     }
 
-    if (!this.config.signer && !this.config.privateKey) {
-      this.log('Refund executor requires signer or privateKey');
+    if (!this.config.signer && !this.config.privateKey && !this.config.solanaPrivateKey) {
+      this.log('Refund executor requires signer, privateKey, or solanaPrivateKey');
       return;
     }
 

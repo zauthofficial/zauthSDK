@@ -63,7 +63,7 @@ export function createZauthMiddleware(options: ZauthMiddlewareOptions): RequestH
 
   // Initialize refund executor if refunds are enabled
   let refundExecutor: RefundExecutor | undefined;
-  if (config.refund.enabled && (config.refund.signer || config.refund.privateKey)) {
+  if (config.refund.enabled && (config.refund.signer || config.refund.privateKey || config.refund.solanaPrivateKey)) {
     refundExecutor = createRefundExecutor(client, config.refund, config.debug);
     refundExecutor.start();
     if (config.debug) {
