@@ -76,6 +76,18 @@ export class ZauthClient {
    * Queue an event for batched submission
    */
   queueEvent(event: ZauthEvent): void {
+    // Cap queue size to prevent unbounded memory growth
+    const MAX_QUEUE_SIZE = 500;
+    if (this.eventQueue.length >= MAX_QUEUE_SIZE) {
+      this.log('Event queue full, dropping oldest event', { queueSize: this.eventQueue.length });
+      this.eventQueue.shift();
+    }
+
+    // Truncate large response bodies to prevent oversized payloads
+    if ('body' in event && event.body && JSON.stringify(event.body).length > 10000) {
+      (event as { body: unknown }).body = { _truncated: true, _originalSize: JSON.stringify(event.body).length };
+    }
+
     this.eventQueue.push(event);
     this.log('Event queued', { type: event.type, eventId: event.eventId, queueSize: this.eventQueue.length });
 
@@ -120,10 +132,14 @@ export class ZauthClient {
     try {
       await this.submitBatch(events);
     } catch (error) {
-      // Re-queue failed events if retry is enabled
-      if (this.config.batching.retry) {
+      const errorMsg = (error as Error).message || '';
+      const isPayloadTooLarge = errorMsg.includes('413');
+      // Don't re-queue on 413 (payload too large) — retrying will just fail again
+      if (this.config.batching.retry && !isPayloadTooLarge) {
         this.log('Batch failed, re-queuing events', { count: events.length });
         this.eventQueue.unshift(...events);
+      } else if (isPayloadTooLarge) {
+        this.log('Batch payload too large, dropping events', { count: events.length });
       }
     } finally {
       this.isFlushing = false;
